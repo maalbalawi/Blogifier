@@ -1,7 +1,9 @@
 using Blogifier.Posts;
 using Blogifier.Shared;
+using Blogifier.Storages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -39,16 +41,34 @@ public class PostController : ControllerBase
   }
 
   [HttpPost("add")]
-  public async Task<string> AddPostAsync([FromBody] PostEditorDto post)
+  [RequestSizeLimit(128 * 1024 * 1024)]
+  public async Task<string> AddPostAsync([FromServices] StorageManager storageManager, [FromBody] PostEditorDto post)
   {
     var userId = User.FirstUserId();
+    var uploadAt = DateTime.UtcNow;
+    if (!string.IsNullOrEmpty(post.Cover))
+    {
+      var coverUrl = await storageManager.UploadImagesBase64(uploadAt, userId, post.Cover);
+      post.Cover = coverUrl;
+    }
+    var uploadContent = await storageManager.UploadImagesBase64FoHtml(uploadAt, userId, post.Content);
+    post.Content = uploadContent;
     return await _postProvider.AddAsync(post, userId);
   }
 
   [HttpPut("update")]
-  public async Task UpdateAsync(PostEditorDto post)
+  [RequestSizeLimit(128 * 1024 * 1024)]
+  public async Task UpdateAsync([FromServices] StorageManager storageManager, [FromBody] PostEditorDto post)
   {
     var userId = User.FirstUserId();
+    var uploadAt = DateTime.UtcNow;
+    if (!string.IsNullOrEmpty(post.Cover))
+    {
+      var coverUrl = await storageManager.UploadImagesBase64(uploadAt, userId, post.Cover);
+      post.Cover = coverUrl;
+    }
+    var uploadContent = await storageManager.UploadImagesBase64FoHtml(uploadAt, userId, post.Content);
+    post.Content = uploadContent;
     await _postProvider.UpdateAsync(post, userId);
   }
 
