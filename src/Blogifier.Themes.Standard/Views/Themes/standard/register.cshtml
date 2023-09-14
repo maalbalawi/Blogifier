@@ -2,9 +2,10 @@
 @inject IStringLocalizer<Resource> _localizer
 @{
   Layout = "layouts/_account.cshtml";
+  var redirectUri = Url.Content("~/account/register");
 }
 
-@section HeadMeta{
+@section HeaderScript{
   <title>@_localizer["register"]</title>
 }
 
@@ -44,4 +45,5 @@
     <span class="validation-message" asp-validation-for="PasswordConfirm"></span>
   </div>
   <button type="submit" class="btn btn-blogifier btn-block btn-floating">@_localizer["register"]</button>
+  <a style="margin-top:8px;" class="btn btn-default btn-block btn-floating btn-a" role="button" href="~/account/login?RedirectUri=@redirectUri">@_localizer["cancel"]</a>
 </form>

@@ -2,10 +2,10 @@ using Blogifier.Extensions;
 using Blogifier.Helper;
 using Blogifier.Shared;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -19,19 +19,28 @@ public class StorageManager
 {
   private readonly ILogger _logger;
   private readonly IHttpClientFactory _httpClientFactory;
-  private readonly BlogifierConfigure _blogifierConfigure;
   private readonly IStorageProvider _storageProvider;
+  private readonly string[]? _fileExtensions;
+  private readonly IContentTypeProvider _contentTypeProvider;
 
   public StorageManager(
     ILogger<StorageManager> logger,
     IHttpClientFactory httpClientFactory,
-    IOptions<BlogifierConfigure> blogifierConfigure,
-    IStorageProvider storageProvider)
+    IStorageProvider storageProvider,
+    IConfiguration configuration,
+    IContentTypeProvider contentTypeProvider)
   {
     _logger = logger;
     _httpClientFactory = httpClientFactory;
-    _blogifierConfigure = blogifierConfigure.Value;
     _storageProvider = storageProvider;
+    _contentTypeProvider = contentTypeProvider;
+
+    var fileExtensionsString = configuration[$"{BlogifierConstant.Key}:FileExtensions"];
+    if (!string.IsNullOrEmpty(fileExtensionsString))
+    {
+      _fileExtensions = fileExtensionsString.Split(',')!;
+    }
+
   }
 
   public async Task<StorageDto> UploadAsync(DateTime uploadAt, int userid, Uri baseAddress, string url, string? fileName = null)
@@ -95,14 +104,15 @@ public class StorageManager
 
   public async Task<string> UploadImagesFoHtml(DateTime uploadAt, int userid, Uri baseAddress, string content)
   {
-    var matches = StringHelper.MatchesImgTags(content);
+    var matches = StringHelper.HtmlImgTagsGeneratedRegex().Matches(content);
     if (matches.Any())
     {
       var contentBuilder = new StringBuilder(content);
+      var htmlImgSrcRegex = StringHelper.HtmlImgSrcGeneratedRegex();
       foreach (Match match in matches.Cast<Match>())
       {
         var tag = match.Value;
-        var matchUrl = StringHelper.MatchImgSrc(tag);
+        var matchUrl = htmlImgSrcRegex.Match(tag);
         var urlString = matchUrl.Groups[1].Value;
         var storage = await UploadAsync(uploadAt, userid, baseAddress, urlString);
         var uploadTag = $"![{storage.Name}]({storage.Slug})";
@@ -115,7 +125,7 @@ public class StorageManager
 
   public async Task<string> UploadFilesFoHtml(DateTime uploadAt, int userid, Uri baseAddress, string content)
   {
-    var matches = StringHelper.MatchesFile(content);
+    var matches = StringHelper.HtmlFileGeneratedRegex().Matches(content);
     if (matches.Any())
     {
       var contentBuilder = new StringBuilder(content);
@@ -136,12 +146,52 @@ public class StorageManager
   }
 
 
+  public async Task<string> UploadImagesBase64FoHtml(DateTime uploadAt, int userid, string content)
+  {
+    var dataImageBase64Matches = StringHelper.MarkdownDataImageBase64BlobGeneratedRegex().Matches(content);
+    if (dataImageBase64Matches.Count > 0)
+    {
+      var contentStringBuilder = new StringBuilder(content);
+      foreach (Match match in dataImageBase64Matches.Cast<Match>())
+      {
+        var fileNameMarkdown = match.Groups["filename"].Value;
+        var imageType = match.Groups["type"].Value;
+        var base64Data = match.Groups["data"].Value;
+        var imageDataBytes = Convert.FromBase64String(base64Data);
+        var fileName = Guid.NewGuid().ToString() + "." + imageType;
+        var path = $"{userid}/{uploadAt.Year}{uploadAt.Month}/{fileName}";
+        if (!_contentTypeProvider.TryGetContentType(fileName, out var contentType))
+          contentType = "text/html";
+        var storage = await _storageProvider.AddAsync(uploadAt, userid, path, fileName, imageDataBytes, contentType);
+        var uploadTag = $"![{fileNameMarkdown}]({storage.Slug})";
+        contentStringBuilder.Replace(match.Value, uploadTag);
+      }
+      content = contentStringBuilder.ToString();
+    }
+    return content;
+  }
+
+  public async Task<string> UploadImagesBase64(DateTime uploadAt, int userid, string dataOrUrl)
+  {
+    var match = StringHelper.DataImageBase64GeneratedRegex().Match(dataOrUrl);
+    if (match.Success)
+    {
+      var imageType = match.Groups["type"].Value;
+      var base64Data = match.Groups["data"].Value;
+      var imageDataBytes = Convert.FromBase64String(base64Data);
+      var fileName = Guid.NewGuid().ToString() + "." + imageType;
+      var path = $"{userid}/{uploadAt.Year}{uploadAt.Month}/{fileName}";
+      if (!_contentTypeProvider.TryGetContentType(fileName, out var contentType))
+        contentType = "text/html";
+      var storage = await _storageProvider.AddAsync(uploadAt, userid, path, fileName, imageDataBytes, contentType);
+      return storage.Slug;
+    }
+    return dataOrUrl;
+  }
+
   private bool InvalidFileName(string fileName)
   {
-    var fileExtensions = BlogifierConstant.FileExtensions;
-    var configFileExtensions = _blogifierConfigure.FileExtensions;
-    if (!string.IsNullOrEmpty(configFileExtensions))
-      fileExtensions = new List<string>(configFileExtensions.Split(','));
+    var fileExtensions = _fileExtensions ?? BlogifierConstant.FileExtensions;
     return fileExtensions.Any(fileName.EndsWith);
   }
 

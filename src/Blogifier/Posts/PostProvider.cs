@@ -4,7 +4,9 @@ using Blogifier.Data;
 using Blogifier.Extensions;
 using Blogifier.Helper;
 using Blogifier.Shared;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.EntityFrameworkCore;
+using ReverseMarkdown.Converters;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -57,15 +59,15 @@ public class PostProvider : AppProvider<Post, int>
 
     var olderQuery = _dbContext.Posts
       .AsNoTracking()
-      .Where(m => m.State >= PostState.Release && m.PublishedAt < post.PublishedAt)
-      .OrderByDescending(p => p.PublishedAt);
+      .Where(m => m.State >= PostState.Release && m.PublishedAt > post.PublishedAt)
+      .OrderBy(p => p.PublishedAt);
 
     var older = await _mapper.ProjectTo<PostItemDto>(olderQuery).FirstOrDefaultAsync();
 
     var newerQuery = _dbContext.Posts
       .AsNoTracking()
-      .Where(m => m.State >= PostState.Release && m.PublishedAt > post.PublishedAt)
-      .OrderBy(p => p.PublishedAt);
+      .Where(m => m.State >= PostState.Release && m.PublishedAt < post.PublishedAt)
+      .OrderByDescending(p => p.PublishedAt);
 
     var newer = await _mapper.ProjectTo<PostItemDto>(newerQuery).FirstOrDefaultAsync();
 
@@ -129,7 +131,7 @@ public class PostProvider : AppProvider<Post, int>
       PublishedStatus.Featured |
       PublishedStatus.Published => query.Where(p => p.State >= PostState.Release).OrderByDescending(p => p.PublishedAt),
       PublishedStatus.Drafts => query.Where(p => p.State == PostState.Draft).OrderByDescending(p => p.Id),
-      _ => query.OrderByDescending(p => p.Id),
+      _ => query.OrderByDescending(p => p.PublishedAt).ThenByDescending(p => p.CreatedAt),
     };
 
     return await _mapper.ProjectTo<PostItemDto>(query).ToListAsync();
@@ -240,8 +242,7 @@ public class PostProvider : AppProvider<Post, int>
   public async Task StateInternalAsynct(IQueryable<Post> query, PostState state)
   {
     await query.ExecuteUpdateAsync(setters =>
-        setters.SetProperty(b => b.State, state)
-        .SetProperty(b => b.PublishedAt, b => GetPublishedAt(b.PublishedAt, state)));
+        setters.SetProperty(b => b.State, state));
   }
 
   public async Task<string> AddAsync(PostEditorDto postInput, int userId)
@@ -255,8 +256,12 @@ public class PostProvider : AppProvider<Post, int>
   {
     var slug = await GetSlugFromTitle(postInput.Title);
     var postCategories = await CheckPostCategories(postInput.Categories);
-    var contentFiltr = StringHelper.RemoveImgTags(StringHelper.RemoveScriptTags(postInput.Content));
-    var descriptionFiltr = StringHelper.RemoveImgTags(StringHelper.RemoveScriptTags(postInput.Description));
+
+    var contentScriptFiltr = StringHelper.HtmlScriptGeneratedRegex().Replace(postInput.Content, string.Empty);
+    var descriptionScriptFiltr = StringHelper.HtmlScriptGeneratedRegex().Replace(postInput.Description, string.Empty);
+    var contentFiltr = StringHelper.HtmlImgGeneratedRegex().Replace(contentScriptFiltr, string.Empty);
+    var descriptionFiltr = StringHelper.HtmlImgGeneratedRegex().Replace(descriptionScriptFiltr, string.Empty);
+
     var publishedAt = GetPublishedAt(postInput.PublishedAt, postInput.State);
     var post = new Post
     {
@@ -315,8 +320,12 @@ public class PostProvider : AppProvider<Post, int>
 
     post.Slug = postInput.Slug!;
     post.Title = postInput.Title;
-    var contentFiltr = StringHelper.RemoveImgTags(StringHelper.RemoveScriptTags(postInput.Content));
-    var descriptionFiltr = StringHelper.RemoveImgTags(StringHelper.RemoveScriptTags(postInput.Description));
+
+    var contentScriptFiltr = StringHelper.HtmlScriptGeneratedRegex().Replace(postInput.Content, string.Empty);
+    var descriptionScriptFiltr = StringHelper.HtmlScriptGeneratedRegex().Replace(postInput.Description, string.Empty);
+    var contentFiltr = StringHelper.HtmlImgGeneratedRegex().Replace(contentScriptFiltr, string.Empty);
+    var descriptionFiltr = StringHelper.HtmlImgGeneratedRegex().Replace(descriptionScriptFiltr, string.Empty);
+
     post.Description = descriptionFiltr;
     post.Content = contentFiltr;
     post.Cover = postInput.Cover;
